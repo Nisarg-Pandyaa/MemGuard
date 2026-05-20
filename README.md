@@ -44,18 +44,18 @@ gcc -I./include -o myprogram examples/your_file.c src/memguard.c
 
 ## Example Output
 
-=== MemGuard Report ===
-[LEAK] 100 bytes at main.c:23
-[DOUBLE-FREE] at utils.c:45
-Originally allocated at utils.c:12
+=== MemGuard Report === </br>
+[LEAK] 100 bytes at main.c:23 </br>
+[DOUBLE-FREE] at utils.c:45 </br>
+Originally allocated at utils.c:12 </br> </br>
 
-Total: 1 leaks, 100 bytes
+Total: 1 leaks, 100 bytes </br> </br>
 
-=== Memory Statistics ===
-Total allocated:  500 bytes
-Peak memory:      450 bytes
-Allocations:      5
-Frees:            4
+=== Memory Statistics === </br>
+Total allocated:  500 bytes </br>
+Peak memory:      450 bytes </br>
+Allocations:      5 </br>
+Frees:            4 </br> </br>
 
 ## How It Works
 
@@ -67,15 +67,15 @@ MemGuard wraps standard memory functions (`malloc`, `free`, etc.) to track every
 
 ## Project Structure
 
-memguard/
-├── include/
-│   ├── memguard.h           # Public API
-│   └── memguard_internal.h  # Internal structures
-├── src/
-│   └── memguard.c           # Implementation
-├── examples/
-│   └── test_basic.c         # Example usage
-└── README.md
+memguard/ </br>
+├── include/ </br>
+│   ├── memguard.h           # Public API </br>
+│   └── memguard_internal.h  # Internal structures </br>
+├── src/ </br>
+│   └── memguard.c           # Implementation </br>
+├── examples/ </br>
+│   └── test_basic.c         # Example usage </br>
+└── README.md </br> </br>
 
 ## Requirements
 
