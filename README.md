@@ -88,10 +88,10 @@ MIT License - Free to use and modify
 
 ## Author
 
-Nisarg Pandya </br>
-GitHub : </br>
-LinkedIn : </br>
-E-Mail : </br>
+Nisarg Pandya </br> </br>
+GitHub : https://github.com/Nisarg-Pandyaa</br>
+LinkedIn : www.linkedin.com/in/nisarg-s-pandya</br>
+E-Mail : nisargspandyaa@gmail.com</br>
 
 ## Contributing
 
