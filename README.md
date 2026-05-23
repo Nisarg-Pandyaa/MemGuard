@@ -65,6 +65,36 @@ MemGuard wraps standard memory functions (`malloc`, `free`, etc.) to track every
 - **Double frees**: Attempting to free already-freed memory
 - **Invalid frees**: Freeing pointers not allocated by MemGuard
 
+## Known Limitations
+
+### 1. Extreme Buffer Overflows
+MemGuard detects buffer overflows using canary values placed 
+around allocated memory. However, extreme overflows (writing 
+far past the buffer end) may corrupt MemGuard's own internal 
+tracking structures.
+
+For production debugging of extreme overflows, use:
+- **AddressSanitizer** (built into GCC/Clang)
+- **Valgrind** (Linux)
+
+### 2. Heap Memory Only
+MemGuard only tracks heap memory (malloc/free).
+These are NOT monitored:
+- Stack variables: `int x = 5;`
+- Global variables: `int global = 0;`
+- String literals: `char* s = "hello";`
+
+### 3. Performance Overhead
+MemGuard adds overhead to every malloc/free call.
+Use only during development/debugging, not in production.
+
+## Future Improvements (Version 2.0)
+- [ ] Separate tracking memory using mmap()
+- [ ] Stack variable monitoring
+- [ ] GUI report viewer
+- [ ] CI/CD integration
+- [ ] Thread safety
+
 ## Project Structure
 
 memguard/ </br>

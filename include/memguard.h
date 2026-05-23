@@ -32,6 +32,7 @@ void mg_print_statistics(void);
 /* Initialization and cleanup */
 void mg_init(void);
 void mg_cleanup(void);
+int mg_has_errors(void);
 
 /* Macros to replace standard functions */
 #ifdef MEMGUARD_ENABLED

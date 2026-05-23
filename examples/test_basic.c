@@ -45,20 +45,42 @@ void test_double_free() {
     
     /* This should be detected! */
     free(data); 
-    printf("(Double free test disabled for now)\n");
+    
+}
+
+void test_use_after_free(){
+    printf("\n=== Test 5 : Use-After-Free (Intentional) ===\n");
+
+    int* data = (int*)malloc(sizeof(int));
+    *data = 69;
+    printf("Value Before Free : %d\n", *data);
+
+    free(data);
+    printf("Freed the Memory\n");
+
+    /* This should be detected as use-after-free */
+    *data = 100; // Modifying memory after free
+    printf("Wrote %d to freed memory\n", *data);
+
+    
 }
 
 void test_buffer_overflow() {
     printf("\n=== Test 4: Buffer Overflow (Intentional) ===\n");
+    printf("Note: Writing just past end of buffer\n");
     
     char* buffer = (char*)malloc(10);
     strcpy(buffer, "Short");
     printf("Buffer: %s\n", buffer);
     
-    /* This writes beyond allocated space! */
-    /* Uncomment to test: strcpy(buffer, "This is way too long for a 10 byte buffer!"); */
-    
-    printf("(Buffer overflow test disabled for now)\n");
+    /* Controlled overflow - corrupts back canary only */
+    buffer[10] = 'X';
+    buffer[11] = 'X';
+    buffer[12] = 'X';
+    buffer[13] = 'X';
+
+    printf("Wrote past end of buffer\n");
+
     free(buffer);
 }
 
@@ -71,11 +93,11 @@ int main() {
     test_basic_allocation();
     test_memory_leak();
     test_double_free();
+    test_use_after_free();
     test_buffer_overflow();
     
     printf("\n=== Final Report ===\n");
     mg_cleanup();
-    mg_print_statistics();
     
-    return 0;
+    return mg_has_errors() ? 1 : 0;
 }

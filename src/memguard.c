@@ -50,22 +50,46 @@ void* mg_malloc(size_t size, const char* file, int line) {
      */
     
     printf("[DEBUG] malloc(%lu) called from %s:%d\n", (unsigned long)size, file, line);
-    
-    void* ptr = malloc(size);
-    if (!ptr) {
-        return NULL;
+
+    if(size == 0){
+        return NULL;          // allocation 0 byte returns NULL (or a unique pointer that can be freed, but we choose NULL for simplicity)
     }
+
+    // calculate total size needed (front canary + user size + back canary)
+    size_t total_size = sizeof(unsigned int)       // front canary
+                        + size                     // user allocated size (user's data)
+                        + sizeof(unsigned int);    // back canary
+    
+
+    void* real_ptr = malloc(total_size);
+
+    if (!real_ptr) {
+        return NULL;       // allocation failed 
+    }
+
+    // set front canary (before user data)
+    unsigned int* front_canary = (unsigned int*)real_ptr;
+    *front_canary = MG_CANARY_VALUE;
+
+    //Calculate user pointer (after front canary)
+    void* user_ptr = (void*)(front_canary + 1); // move past front canary
+
+
+    // set back canary (after user data)
+    unsigned int* back_canary = (unsigned int*)((char*)user_ptr + size);
+    *back_canary = MG_CANARY_VALUE;
+
     
     // Create a tracking structure
     allocation_t* alloc = (allocation_t*)malloc(sizeof(allocation_t));
     if (!alloc) {
-        free(ptr);
+        free(real_ptr);
         return NULL;
     }
     
     // Fill in the tracking information
-    alloc->user_ptr = ptr;
-    alloc->real_ptr = ptr;
+    alloc->user_ptr = user_ptr;                    // pointer returned to user (after front canary)
+    alloc->real_ptr = real_ptr;                    // pointer to the actual malloc'd block (including canaries)
     alloc->size = size;
     alloc->file = file;
     alloc->line = line;
@@ -85,9 +109,9 @@ void* mg_malloc(size_t size, const char* file, int line) {
         g_state.peak_memory = g_state.current_memory;
     }
     
-    printf("[MemGuard] Allocated %lu bytes at %s : %d\n", (unsigned long)size, file, line);
+    printf("[MemGuard] Allocated %lu bytes at %s:%d\n", (unsigned long)size, file, line);
     
-    return ptr;
+    return user_ptr;                   // Return pointer to user data (after front canary, not the real pointer)
 }
 
 void mg_free(void* ptr, const char* file, int line) {
@@ -122,20 +146,46 @@ void mg_free(void* ptr, const char* file, int line) {
     if (alloc->is_freed) {
         printf(COLOR_RED "[DOUBLE-FREE] at %s:%d\n" COLOR_RESET, file, line);
         printf("  Originally allocated at %s:%d\n", alloc->file, alloc->line);
+        g_state.double_free_count++;
         return;  // Don't actually free again
     }
+
+    // Checking Canaries for buffer overflow detection
+    // unsigned int* front_canary = (unsigned int*)alloc->real_ptr;
+    // unsigned int* back_canary = (unsigned int*)((char*)alloc->user_ptr + alloc->size);
+
+    // int front_ok = (*front_canary == MG_CANARY_VALUE);
+    // int back_ok = (*back_canary == MG_CANARY_VALUE);
+
+    // if(!front_ok){
+    //     printf(COLOR_RED "[BUFFER UNDERFLOW] Detected (front canary corrupted) at %s:%d\n" COLOR_RESET, file, line);
+    //     printf("  Memory allocated at %s:%d\n", alloc->file, alloc->line);
+    //     printf("  Front Canary Corrupted! :: [ Expected : 0x%X ] [ Found : 0x%X ]\n", MG_CANARY_VALUE, *front_canary);
+    // }
+
+    // if(!back_ok){
+    //     printf(COLOR_RED "[BUFFER OVERFLOW] Detected (back canary corrupted) at %s:%d\n" COLOR_RESET, file,line);
+    //     printf("  Memory allocated at %s:%d\n", alloc->file, alloc->line);
+    //     printf("  Back Canary Corrupted! :: [Expected : 0x%X ] [ Found : 0x%X ]\n", MG_CANARY_VALUE, *back_canary);
+
+    // }
+
+    check_canary(alloc);
+
+    memset(alloc->user_ptr, 0xDD, alloc->size); // Poison user memory to help detect use-after-free
     
-    // Step 3: Mark as freed
-    alloc->is_freed = 1;
+
+    alloc->is_freed = 1; // Mark as freed for use-after-free detection
     
-    // Step 4: Update statistics
+    // Step 5: Update statistics
     g_state.current_memory -= alloc->size;
     g_state.free_count++;
     
-    printf("[MemGuard] Freed %lu bytes at %s:%d\n", (unsigned long)alloc->size, file, line);
+    printf("[MemGuard] Freed %lu bytes at %s:%d (poisoned)\n", (unsigned long)alloc->size, file, line);
     
-    // Step 5: Actually free the memory
-    free(ptr);
+    // Step 6: DON'T free real_ptr yet!
+    // Keep poisoned memory alive until mg_cleanup()
+    // So we can detect use-after-free
 }
 
 void* mg_calloc(size_t num, size_t size, const char* file, int line) {
@@ -175,11 +225,14 @@ allocation_t* find_allocation(void* ptr) {
     
     allocation_t* current = g_state.head;
     while (current != NULL) {
+         
         if (current->user_ptr == ptr) {
+        
             return current;
         }
         current = current->next;
     }
+    
     return NULL;
 }
 
@@ -218,7 +271,68 @@ int check_canary(allocation_t* alloc) {
      * - Compare with MG_CANARY_VALUE
      */
     
-    return 1;  /* Placeholder */
+    if(alloc == NULL || alloc->real_ptr == NULL || alloc->user_ptr == NULL){
+        return 0;  // Invalid allocation 
+    }
+
+    // get front and back canary pointers
+    unsigned int* front_canary = (unsigned int*)alloc->real_ptr;
+    unsigned int* back_canary = (unsigned int*)((char*)alloc->user_ptr + alloc->size);
+
+    // check if canaries are intact
+
+    int front_ok = (*front_canary == MG_CANARY_VALUE);
+    int back_ok = (*back_canary == MG_CANARY_VALUE);
+
+    if(front_ok == 0){
+        printf(COLOR_RED "[CANARY CORRUPTED] FRONT CANARY Corrupted for allocation at %s:%d\n" COLOR_RESET, alloc->file, alloc->line);
+        printf(" - [Expected : 0x%X] [Found : 0x%X]\n", MG_CANARY_VALUE, *front_canary);
+        g_state.underflow_count++;
+    }
+
+    if(back_ok == 0){
+        printf(COLOR_RED "[CANARY CORRUPTED] BACK CANARY Corrupted for allocation at %s:%d\n" COLOR_RESET, alloc->file, alloc->line);
+        printf(" - [Expected : 0x%X] [Found : 0x%X]\n", MG_CANARY_VALUE, *back_canary);
+        g_state.overflow_count++;
+    }
+
+    return front_ok && back_ok;  /* Placeholder */
+}
+
+int check_use_after_free(allocation_t* alloc) {
+
+    if(alloc == NULL || alloc->is_freed == 0 || alloc->user_ptr == NULL){
+        return 0; // Not freed or invalid allocation
+    }
+
+    // check if poisoned memory is modified
+    unsigned char* mem = (unsigned char*)alloc->user_ptr;
+    
+    int first_modified_byte = -1;
+    unsigned char found_value = 0;
+
+    for(size_t i = 0;i<alloc->size;i++){
+        if(mem[i]!=0xDD){
+            
+            if(first_modified_byte == -1){
+                first_modified_byte = (int)i;
+                found_value = mem[i];
+            }
+        }
+    }
+
+    if(first_modified_byte != -1){
+        printf(COLOR_RED "[USE-AFTER-FREE] Detected!\n" COLOR_RESET);
+        printf(" - Allocation at %s:%d\n", alloc->file, alloc->line);
+        printf(" - Size : %lu bytes\n", (unsigned long)alloc->size);
+        printf(" - First Modified Byte Offset: %d\n", first_modified_byte);
+        printf(" - [Expected : 0xDD] [Found : 0x%02X]\n", found_value);
+        g_state.use_after_free_count++;
+
+        return 1; // Use-after-free detected
+    }
+
+    return 0; // No modification detected
 }
 
 /* ========================================
@@ -234,20 +348,42 @@ void mg_report(void) {
     allocation_t* current = g_state.head;
     while (current != NULL) {
         if (!current->is_freed) {
+            // This allocation was never freed - report as a leak
             printf(COLOR_RED "[LEAK]" COLOR_RESET " %lu bytes at %s:%d\n",
                    (unsigned long)current->size, current->file, current->line);
             leak_count++;
             leaked_bytes += current->size;
         }
+        else{
+            // Check for use-after-free on freed allocations
+            check_use_after_free(current);
+        }
         current = current->next;
     }
-    
-    if (leak_count == 0) {
+
+    g_state.leak_count = leak_count;
+    printf("\n");
+    if (g_state.leak_count == 0 && g_state.overflow_count == 0 && g_state.underflow_count == 0 && g_state.double_free_count == 0 && g_state.use_after_free_count == 0) {
         printf(COLOR_GREEN "- No Memory Leaks Detected !! \n" COLOR_RESET);
     } else {
-        printf("\n" COLOR_RED "Total: %d leaks, %lu bytes\n" COLOR_RESET,
-               leak_count, (unsigned long)leaked_bytes);
+        if(g_state.leak_count > 0){
+            printf(COLOR_RED "- Total Leaks: %d, Total Leaked Bytes: %lu\n" COLOR_RESET, g_state.leak_count, (unsigned long)leaked_bytes);
+        }
+        if(g_state.overflow_count > 0){
+            printf(COLOR_RED "- Total Buffer Overflows Detected: %d\n" COLOR_RESET, g_state.overflow_count);
+        }
+        if(g_state.underflow_count > 0){
+            printf(COLOR_RED "- Total Buffer Underflows Detected: %d\n" COLOR_RESET, g_state.underflow_count);
+        }
+        if(g_state.double_free_count > 0){
+            printf(COLOR_RED "- Total Double Frees Detected: %d\n" COLOR_RESET, g_state.double_free_count);
+        }
+        if(g_state.use_after_free_count > 0){
+            printf(COLOR_RED "- Total Use-After-Free Errors Detected: %d\n" COLOR_RESET, g_state.use_after_free_count);
+        }
     }
+
+    mg_print_statistics();
     
     printf("\n");
 }
@@ -304,4 +440,33 @@ void mg_cleanup(void) {
     /* TODO: Clean up all tracking structures */
     printf(COLOR_YELLOW "MemGuard cleanup\n" COLOR_RESET);
     mg_report();
+
+    // then free all allocations and tracking structures
+    allocation_t* current = g_state.head;
+    while(current!=NULL){
+        allocation_t* next = current->next;
+
+        if(current->real_ptr){
+            free(current->real_ptr); // Free the actual memory (including canaries)
+        }
+
+        if(current->freed_snapshot){
+            free(current->freed_snapshot); // Free the snapshot memory
+        }
+
+        free(current); // Free the tracking structure
+        current = next;
+
+    }
+
+    g_state.head = NULL; // Reset head to NULL after cleanup
+
 }
+
+int mg_has_errors(void){
+        return (g_state.leak_count > 0||
+                g_state.overflow_count > 0 ||
+                g_state.underflow_count > 0 ||
+                g_state.double_free_count > 0 ||
+                g_state.use_after_free_count > 0);
+    }

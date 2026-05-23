@@ -13,6 +13,7 @@
 typedef struct allocation {
     void* user_ptr;           /* Pointer given to user */
     void* real_ptr;           /* Actual malloc pointer (includes canary) */
+    void* freed_snapshot;       /* Snapshot of memory at time of free (for use-after-free detection) */
     size_t size;              /* Size requested by user */
     const char* file;         /* Source file where allocated */
     int line;                 /* Line number */
@@ -29,6 +30,13 @@ typedef struct {
     size_t current_memory;    /* Current memory in use */
     int allocation_count;     /* Total number of allocations */
     int free_count;           /* Total number of frees */
+
+    // Error Counters
+    int leak_count;           /* Number of detected leaks */
+    int overflow_count;       /* Number of detected buffer overflows */
+    int underflow_count;      /* Number of detected buffer underflows */
+    int double_free_count;    /* Number of detected double frees */
+    int use_after_free_count; /* Number of detected use-after-free errors */
 } memguard_state_t;
 
 /* Global state (defined in memguard.c) */
@@ -39,5 +47,6 @@ allocation_t* find_allocation(void* ptr);
 void add_allocation(allocation_t* alloc);
 void remove_allocation(allocation_t* alloc);
 int check_canary(allocation_t* alloc);
+int check_use_after_free(allocation_t* alloc);
 
 #endif /* MEMGUARD_INTERNAL_H */
