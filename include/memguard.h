@@ -27,6 +27,7 @@ void mg_free(void* ptr, const char* file, int line);
 /* Reporting */
 void mg_report(void);
 void mg_report_to_file(const char* filename);
+void mg_report_to_json(const char* filename);
 void mg_print_statistics(void);
 
 /* Initialization and cleanup */

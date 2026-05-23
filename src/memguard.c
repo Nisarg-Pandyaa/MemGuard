@@ -419,6 +419,97 @@ void mg_report_to_file(const char* filename) {
     printf("Report written to %s\n", filename);
 }
 
+void mg_report_to_json(const char* filename) {
+    FILE* fp = fopen(filename, "w");
+    if (!fp) {
+        fprintf(stderr, "Failed to open %s\n", filename);
+        return;
+    }
+    
+    fprintf(fp, "{\n");
+    
+    /* Summary section */
+    fprintf(fp, "  \"summary\": {\n");
+    fprintf(fp, "    \"leaks\": %d,\n",            g_state.leak_count);
+    fprintf(fp, "    \"overflows\": %d,\n",         g_state.overflow_count);
+    fprintf(fp, "    \"underflows\": %d,\n",        g_state.underflow_count);
+    fprintf(fp, "    \"double_frees\": %d,\n",      g_state.double_free_count);
+    fprintf(fp, "    \"use_after_free\": %d,\n",    g_state.use_after_free_count);
+    fprintf(fp, "    \"total_errors\": %d\n",
+            g_state.leak_count +
+            g_state.overflow_count +
+            g_state.underflow_count +
+            g_state.double_free_count +
+            g_state.use_after_free_count);
+    fprintf(fp, "  },\n");
+    
+    /* Statistics section */
+    fprintf(fp, "  \"statistics\": {\n");
+    fprintf(fp, "    \"total_allocated_bytes\": %lu,\n",
+            (unsigned long)g_state.total_allocated);
+    fprintf(fp, "    \"peak_memory_bytes\": %lu,\n",
+            (unsigned long)g_state.peak_memory);
+    fprintf(fp, "    \"total_allocations\": %d,\n",
+            g_state.allocation_count);
+    fprintf(fp, "    \"total_frees\": %d\n",
+            g_state.free_count);
+    fprintf(fp, "  },\n");
+    
+/* Issues section */
+    fprintf(fp, "  \"issues\": [\n");
+    
+    int first = 1;
+    allocation_t* current = g_state.head;
+    while (current != NULL) {
+        /* LEAKS */
+        if (!current->is_freed) {
+            if (!first) fprintf(fp, ",\n");
+            fprintf(fp, "    {\n");
+            fprintf(fp, "      \"type\": \"LEAK\",\n");
+            fprintf(fp, "      \"file\": \"%s\",\n", current->file);
+            fprintf(fp, "      \"line\": %d,\n",     current->line);
+            fprintf(fp, "      \"size\": %lu\n",     (unsigned long)current->size);
+            fprintf(fp, "    }");
+            first = 0;
+        }
+        current = current->next;
+    }
+    
+    /* Add other error types to issues */
+    if (g_state.overflow_count > 0) {
+        if (!first) fprintf(fp, ",\n");
+        fprintf(fp, "    {\n");
+        fprintf(fp, "      \"type\": \"BUFFER_OVERFLOW\",\n");
+        fprintf(fp, "      \"count\": %d\n", g_state.overflow_count);
+        fprintf(fp, "    }");
+        first = 0;
+    }
+    
+    if (g_state.double_free_count > 0) {
+        if (!first) fprintf(fp, ",\n");
+        fprintf(fp, "    {\n");
+        fprintf(fp, "      \"type\": \"DOUBLE_FREE\",\n");
+        fprintf(fp, "      \"count\": %d\n", g_state.double_free_count);
+        fprintf(fp, "    }");
+        first = 0;
+    }
+    
+    if (g_state.use_after_free_count > 0) {
+        if (!first) fprintf(fp, ",\n");
+        fprintf(fp, "    {\n");
+        fprintf(fp, "      \"type\": \"USE_AFTER_FREE\",\n");
+        fprintf(fp, "      \"count\": %d\n", g_state.use_after_free_count);
+        fprintf(fp, "    }");
+        first = 0;
+    }
+    
+    fprintf(fp, "\n  ]\n");
+    fprintf(fp, "}\n");
+    
+    fclose(fp);
+    printf("[MemGuard] JSON report written to %s\n", filename);
+}
+
 void mg_print_statistics(void) {
     /* TODO: Print memory usage statistics
      * - Peak memory usage
@@ -440,6 +531,8 @@ void mg_cleanup(void) {
     /* TODO: Clean up all tracking structures */
     printf(COLOR_YELLOW "MemGuard cleanup\n" COLOR_RESET);
     mg_report();
+
+    mg_report_to_json("memguard_report.json");
 
     // then free all allocations and tracking structures
     allocation_t* current = g_state.head;
